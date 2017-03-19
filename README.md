@@ -1,3 +1,7 @@
+This is a python port from Mark Wheadon's Velocity Painting project. Original readme below.
+
+
+
 # Velocity Painting
 
 I'd love this to evolve into something cool. All I ask is that you use the term _Velocity Painting_, tag things with _#VelocityPainting_, and ack that I, Mark Wheadon, started this bizarre journey with the idea, the name, and some functional though fragile code ;-) See the licence at the bottom of this document.
