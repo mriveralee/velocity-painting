@@ -1,6 +1,6 @@
-This is a python port from Mark Wheadon's Velocity Painting project. Original readme below.
+This is a python port from Mark Wheadon's Velocity Painting project. I've added a new technique which does extrusion painting instead of velocity painting. The code is still a bit of a mess but it works. Read more about the [Extrusion Painting modification](https://nathanapter.wordpress.com/2017/03/23/extrusion-painting-3d-printing/).
 
-
+Original readme below.
 
 # Velocity Painting
 
