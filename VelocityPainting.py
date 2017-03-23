@@ -44,7 +44,7 @@ projectedImageWidth = None
 printCentreX = int(sys.argv.pop(0))
 printCentreY = int(sys.argv.pop(0))
 
-if (projectionMode  == '-projectX'):
+if (projectionMode  == '-projectX' or projectionMode  == '-projectExtrudeX'):
     projectedImageWidth = sys.argv.pop(0)
 
 projectedImageHeight = sys.argv.pop(0)
@@ -84,19 +84,29 @@ maxVecLength = .1 # Longest vector in mm. Splits longer vectors. Very small -> l
 oldX = None
 oldY = None
 oldZ = None
+oldE = None
 currentZ = None
 lastZOutput = -1
 
 outputFile = open(outputFile, 'w')
 
-def surfaceSpeed(x, y, z):
+extra_e = 0
+
+#Output multiplier for F or E
+def surfaceSpeed(x, y, z, ed):
     if (projectionMode == '-cylinderZ'):
         return surfaceSpeedCylinderZ(x, y, z)
     elif (projectionMode == '-projectX'):
         return surfaceSpeedProjectX(x, y, z)
-
-def surfaceSpeedCylinderZ(x, y, z):
+    elif (projectionMode == '-projectExtrudeX'):
+        return surfaceExtrudeProjectX(x, y, z, ed)
+          
+def getPixelIntensity(x, y):
     global pixels
+    pixel = pixels.getpixel((x, y))
+    return (pixel[0] / 255 + pixel[1] / 255 + pixel[2] / 255) / 3 #This wont work for single band images, needs to be addressed. Also a better intensity for color images based on the human eye is (red * 0.299) + (green * 0.587) + (blue * 0.114)
+    
+def surfaceSpeedCylinderZ(x, y, z):
     zNormalized = (z - zOffset) / projectedImageHeight
 
     theta = math.atan2(y - printCentreY, x - printCentreX) + math.pi # 0 to 2pi
@@ -106,14 +116,14 @@ def surfaceSpeedCylinderZ(x, y, z):
     imageY = imageHeight - zNormalized * imageHeight
 
     if (imageX < 0 or imageX >= imageWidth or imageY < 0 or imageY >= imageHeight):
-        return highSpeed
-        # return lowSpeed
+        #return highSpeed
+        return 1
 
     # return highSpeed - image->GetPixel(x=>imageX, y=>imageY)  * (highSpeed - lowSpeed)
     #Returns a 'normalized' pixel from 0 to 1. Is this equivelant to (R/255 + G/255 + B/255) / 3? (0 would be black and 1 for white)
-    pixel = pixels.getpixel((imageX, imageY))
-    pixel_intensity = (pixel[0] / 255 + pixel[1] / 255 + pixel[2] / 255) / 3 #This wont work for single band images, needs to be addressed. Also a better intensity for color images based on the human eye is (red * 0.299) + (green * 0.587) + (blue * 0.114)
-    return lowSpeed + pixel_intensity  * (highSpeed - lowSpeed)
+    pixelIntensity = getPixelIntensity(imageX, imageY)
+    #return pixelIntensity #lowSpeed + pixel_intensity  * (highSpeed - lowSpeed)
+    return pixelIntensity
 
 def surfaceSpeedProjectX(x, y, z):
     global pixels
@@ -124,32 +134,63 @@ def surfaceSpeedProjectX(x, y, z):
     imageY = imageHeight - zNormalized * imageHeight
 
     if (imageX < 0 or imageX >= imageWidth or imageY < 0 or imageY >= imageHeight):
+        #return lowSpeed
+        return 0
+    
+    # return highSpeed - image->GetPixel(x=>imageX, y=>imageY)  * (highSpeed - lowSpeed)
+    pixelIntensity = getPixelIntensity(imageX, imageY)
+    #return lowSpeed + pixel_intensity  * (highSpeed - lowSpeed)
+    return pixelIntensity
+
+def surfaceExtrudeProjectX(x, y, z, ed):
+    #THIS function is now the same as the one above - we don't need two
+    global pixels
+    xNormalized = (x - printCentreX + projectedImageWidth / 2) / projectedImageWidth
+    zNormalized = (z - zOffset) / projectedImageHeight
+
+    imageX = xNormalized * imageWidth
+    imageY = imageHeight - zNormalized * imageHeight
+    
+    if (imageX < 0 or imageX >= imageWidth or imageY < 0 or imageY >= imageHeight):
             # return highSpeed
-        return lowSpeed
+        #return ed
+        return 0
 
     # return highSpeed - image->GetPixel(x=>imageX, y=>imageY)  * (highSpeed - lowSpeed)
-    pixel = pixels.getpixel((imageX, imageY))
-    pixel_intensity = (pixel[0] / 255 + pixel[1] / 255 + pixel[2] / 255) / 3 #This wont work for single band images, needs to be addressed. Also a better intensity for color images based on the human eye is (red * 0.299) + (green * 0.587) + (blue * 0.114)
-    return lowSpeed + pixel_intensity  * (highSpeed - lowSpeed)
+    pixelIntensity = getPixelIntensity(imageX, imageY)
+    return pixelIntensity
 
-def outMove(x, y, z, e, extra):
-    global lastZOutput
+def outMove(x, y, z, e, ed, f, extra):
+    global lastZOutput, extra_e
     zCommand = ''
     if (z != lastZOutput):
         zCommand = ' Z%.3f' % z
-
     added = ''
-    if (extra):
-        added = ' ; added'
 
-    outputFile.write("G1 X%.3f Y%.3f%s E%.3f F%.3f%s\n" % (x, y, zCommand, e, surfaceSpeed(x, y, z), added))
+    #Why are we calling surface speed again here ... why isn't it passed in?
+    if (projectionMode == '-projectExtrudeX'):
+        extra_e += ed * (surfaceSpeed(x, y, z, e) * 5) #Add extrusion from 0 to ed (doubling extrusion)
+    else:
+        f = lowSpeed + surfaceSpeed(x, y, z, e)  * (highSpeed - lowSpeed)
+
+    e += extra_e
+    if (extra):
+        added += ' ; added (extra e: %s, ed: %s), pp: %s' % (extra_e, ed, surfaceSpeed(x, y, z, e))
+    f_string = ''
+    if f:
+        f_string = 'F%.3f' % f
+
+    outputFile.write("G1 X%.3f Y%.3f%s E%.3f %s%s\n" % (x, y, zCommand, e, f_string, added))
     lastZOutput = z
 
-with open(gCodeFile) as f:
-    for line in f:
+with open(gCodeFile) as fileObject:
+    f = None
+    x = y = z = e = None
+    for line in fileObject:
         try:
-            x = y = z = e = f = None
+            x = y = z = e = None
             line = line.rstrip()
+            print('LINE: %s' % line)
 
             #Replace /r with nothing
             #line =~ s/\r//g
@@ -158,6 +199,8 @@ with open(gCodeFile) as f:
             #(x, y, z, e, f) =line =~ /G1 X([^\s]+) Y([^\s]+) Z([^\s]+) E([^\s]+) F(targetSpeed)/
             #The /.../ mean search for the inside. [^\s]+ = at least one of anything but whitespace
 
+            #This captures any move with target speed, and any move that has no speed. Problem is it will capture subsequent moves after a move with a DIFFERENT non-target speed -
+            #    so what is the point of the target speed? It would only work if the lower captures that capture lines without F, only capture after an F with target speed 
             #This could be cleaner. For one the groups() can be given names and made optional so this can be combined into a single matching group
             mo = re.search(r'G1 X([^\s]+) Y([^\s]+) Z([^\s]+) E([^\s]+) F(%s)' % targetSpeed, line)
             if mo:
@@ -171,10 +214,11 @@ with open(gCodeFile) as f:
                     if mo:
                         x, y, z, e = [float(s) for s in mo.groups()]
                     else:
-                        mo = re.search(r'G1 X([^\s]+) Y([^\s]+) E([^\s]+)', line)
+                        mo = re.search(r'G1 X([^\s]+) Y([^\s]+) E([^\s]+)(?: F([^\s]+))?', line)
                         if mo:
-                            x, y, e = [float(s) for s in mo.groups()]
+                            x, y, e, f = [float(s) if s else s for s in mo.groups()]
 
+            print(x, y, z, e, f)
             if (z):
                 currentZ = z
             else:
@@ -182,50 +226,61 @@ with open(gCodeFile) as f:
 
             if x:
                 if not oldZ:
-                    outMove(x, y, z, e, 0)
+                    outMove(x, y, z, e, 0, f, 0)
                 else:
-                    
                     xd = x - oldX
                     yd = y - oldY
                     zd = z - oldZ
-                    ed = e - oldE
+                    ed = e - oldE #E is absolute - this is how much to extrude
+                    #Do I need to set oldE to 0 to start?
+                    
+                    print('oldx: %s, oldy: %s, oldz: %s, oldE:%s, xd: %s, yd: %s, zd: %s, x: %s, y: %s, z: %s, e: %s' % (oldX, oldY, oldZ, oldE, xd, yd, zd, x, y, z, e))
 
                     length = math.sqrt(xd * xd + yd * yd + zd * zd)
 
                     if (length <= maxVecLength):
-                        outMove(x, y, z, e, 0)
+                        outMove(x, y, z, e, 0, f, 0)
                     else:
                         lastSegOut = -1
 
-                        #Get speed: Slow speed outside the image, higher speed based on pixel intensity
-                        oSlow = surfaceSpeed(oldX, oldY, oldZ)
+                        #Get speed or eRate at the beginning of the line
+                        oSlow = surfaceSpeed(oldX, oldY, oldZ, ed)
 
                         #Split GCode move into parts. Length of move / maxVectorLength
                         nSegs = int(length / maxVecLength + 0.5)
-
                         xDelta = xd / nSegs
                         yDelta = yd / nSegs
                         zDelta = zd / nSegs
                         eDelta = ed / nSegs
 
+                        old_segment_eDelta = 0
                         for i in range(1, nSegs+1):
                             nx = oldX + xDelta * i
                             ny = oldY + yDelta * i
                             nz = oldZ + zDelta * i
+                            ne = oldE + eDelta * i
 
-                            slow = surfaceSpeed(nx, ny, nz)
+                            #Get speed: Slow speed outside the image, higher speed based on pixel intensity
+                            slow = surfaceSpeed(nx, ny, nz, ne)
 
                             if ((slow != oSlow) and (i > 1)):
-                                    # pattern has changed. Time to output the vector so far
-                                    outMove(oldX + xDelta * (i - 1),
-                                            oldY + yDelta * (i - 1),
-                                            oldZ + zDelta * (i - 1),
-                                            oldE + eDelta * (i - 1),
-                                            1)
-                                    oSlow = slow
-                                    lastSegOut = i
+                                out_e = oldE + eDelta * (i - 1)
+                                ed = (e - oldE) / nSegs * (i - 1)
+                                segment_delta = ed - old_segment_eDelta
+                                print('NOT EQUAL. e: %s, oldE: %s, slow: %s, oSlow: %s, ne: %s, eDelta: %s, nSegs: %s, out_e:%s, ed:%s' % (e, oldE, slow, oSlow, ne, eDelta, nSegs, out_e, ed))
+                                # pattern has changed. Time to output the vector so far
+                                outMove(oldX + xDelta * (i - 1),
+                                        oldY + yDelta * (i - 1),
+                                        oldZ + zDelta * (i - 1),
+                                        out_e,
+                                        segment_delta, #eDelta * (i - 1),
+                                        f,
+                                        1)
+                                oSlow = slow
+                                lastSegOut = i
+                                old_segment_eDelta += segment_delta
                         if (lastSegOut != nSegs):
-                                outMove(x, y, z, e, 0)
+                            outMove(x, y, z, e, 0, f, 0)
                 oldX = x
                 oldY = y
                 oldZ = z
@@ -241,12 +296,24 @@ with open(gCodeFile) as f:
                 mo = re.search(r'Z([\d\.]+)', line)
                 if mo:
                     currentZ = oldZ = [float(s) for s in mo.groups()][0]
+
+                #Reset extra extrusion when absolute extrusion found
+                mo = re.search(r'G92.*E([\d\.]+)', line)
+                if mo:
+                    extra_e = 0
+
+                #Is there an E command
                 mo = re.search(r'E([\d\.]+)', line)
                 if mo:
                     oldE = [float(s) for s in mo.groups()][0]
+                    #Add extra e
+                    line = re.sub(r'E([\d\.]+)', 'E%s' % (oldE + extra_e), line)
+                    line += ' ; extra e: %s' % extra_e
+                      
                 outputFile.write("%s\n" % line)
         except:
-            print('Error on line: %s' % line)
+            print('\nERROR on line: %s' % line)
+            print('x:%s, y:%s, z:%s, e:%s, f:%s' % (x, y, z, e, f))
             raise
 
 outputFile.close()
