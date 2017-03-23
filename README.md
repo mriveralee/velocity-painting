@@ -1,5 +1,10 @@
 This is a python port from Mark Wheadon's Velocity Painting project. I've added a new technique which does extrusion painting instead of velocity painting. The code is still a bit of a mess but it works. Read more about the [Extrusion Painting modification](https://nathanapter.wordpress.com/2017/03/23/extrusion-painting-3d-printing/).
 
+To run this, install python. Install Pillow. 
+On windows you can install python from python.org and then run c:\python27\scripts\pip.exe install Pillow
+
+Sample command line: python C:\velocity-painting\VelocityPainting.py -projectX 115 155 50 50 0 3600 3600 5400 C:\VelocityPainting\inverted.png C:\VelocityPainting\test.gcode "C:\VelocityPainting\cube output.gcode"
+
 Original readme below.
 
 # Velocity Painting
